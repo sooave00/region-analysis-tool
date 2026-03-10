@@ -44,32 +44,51 @@ def haversine(lat1, lon1, lat2, lon2):
 # 주소 → 좌표
 # -----------------------------
 def geocode_kakao(query):
-
     url = "https://dapi.kakao.com/v2/local/search/address.json"
-
-    headers = {
-        "Authorization": f"KakaoAK {KAKAO_REST_KEY}"
-    }
-
+    headers = {"Authorization": f"KakaoAK {KAKAO_REST_KEY}"}
     full_url = f"{url}?query={urllib.parse.quote(query)}"
 
-    r = requests.get(full_url, headers=headers)
+    r = requests.get(full_url, headers=headers, timeout=10)
+
+    # 에러 원인 확인용
+    if r.status_code != 200:
+        st.error(f"카카오 주소검색 API 오류: status={r.status_code}")
+        st.code(r.text[:500])
+        return None
 
     data = r.json()
-
     docs = data.get("documents", [])
 
     if not docs:
-        return None
+        # 주소검색 실패 시, 키워드 검색 fallback
+        kw_url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+        kw_full_url = f"{kw_url}?query={urllib.parse.quote(query)}"
+        r2 = requests.get(kw_full_url, headers=headers, timeout=10)
+
+        if r2.status_code != 200:
+            st.error(f"카카오 키워드검색 API 오류: status={r2.status_code}")
+            st.code(r2.text[:500])
+            return None
+
+        data2 = r2.json()
+        docs2 = data2.get("documents", [])
+
+        if not docs2:
+            return None
+
+        d0 = docs2[0]
+        return {
+            "lat": float(d0["y"]),
+            "lng": float(d0["x"]),
+            "address_name": d0.get("address_name", d0.get("place_name", query))
+        }
 
     d0 = docs[0]
-
     return {
         "lat": float(d0["y"]),
         "lng": float(d0["x"]),
         "address_name": d0["address_name"]
     }
-
 
 # -----------------------------
 # 카카오 길찾기
@@ -184,5 +203,6 @@ if run:
 
         st.metric("생활권 행정동", len(df))
         st.metric("총 인구", int(df["총인구수"].fillna(0).sum()))
+
 
         st.dataframe(df)
