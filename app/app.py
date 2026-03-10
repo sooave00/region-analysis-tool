@@ -15,9 +15,13 @@ KAKAO_REST_KEY = st.secrets["KAKAO_REST_KEY"]
 # -----------------------------
 # 데이터 로드
 # -----------------------------
+from pathlib import Path
+
 @st.cache_data
 def load_data():
-    return pd.read_csv("../data_clean/dong_master.csv")
+    base_dir = Path(__file__).resolve().parent.parent
+    csv_path = base_dir / "data_clean" / "dong_master.csv"
+    return pd.read_csv(csv_path, encoding="utf-8-sig")
 
 # -----------------------------
 # 직선거리 계산
@@ -206,3 +210,4 @@ if run:
 
 
         st.dataframe(df)
+
