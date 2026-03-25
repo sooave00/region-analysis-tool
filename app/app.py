@@ -373,6 +373,11 @@ if st.session_state.selected_origin:
 if st.session_state.result_df is not None:
     st.subheader("분석 결과")
 
+    st.caption(
+        "※ 이동시간은 행정동 대표 좌표(중심점) 기준으로 계산되며, "
+        "카카오맵에서 조회되는 특정 시설 기준 길찾기와 차이가 있을 수 있습니다."
+    )
+
     if st.session_state.result_df.empty:
         st.warning("해당 조건에서 생활권으로 포함되는 행정동이 없습니다.")
     else:
