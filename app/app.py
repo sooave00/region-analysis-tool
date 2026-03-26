@@ -195,7 +195,8 @@ def render_result_map(origin, result_df):
 
     map_df = result_df.copy()
     map_df["행정동"] = map_df["행정동"].astype(str)
-    map_df["radius"] = map_df["총인구수"].fillna(0).clip(lower=1000, upper=30000) / 8
+    import math
+    map_df["radius"] = map_df["총인구수"].fillna(0).apply(lambda x: max(120, min(math.sqrt(x) * 18, 500)))
 
     origin_layer = pdk.Layer(
         "ScatterplotLayer",
@@ -203,7 +204,7 @@ def render_result_map(origin, result_df):
         get_position="[lng, lat]",
         get_radius=180,
         pickable=True,
-        opacity=0.9,
+        opacity=0.18,
         stroked=True,
         filled=True,
         get_fill_color=[255, 80, 80],
