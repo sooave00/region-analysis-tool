@@ -1,9 +1,9 @@
 import math
 import time
-import urllib.parse
 from pathlib import Path
 
 import pandas as pd
+import pydeck as pdk
 import requests
 import streamlit as st
 
@@ -84,7 +84,6 @@ def haversine(lat1, lon1, lat2, lon2):
 # -----------------------------
 def search_kakao(query):
     headers = {"Authorization": f"KakaoAK {KAKAO_REST_KEY}"}
-
     results = []
 
     # 1차: 키워드 검색
@@ -107,7 +106,7 @@ def search_kakao(query):
                 "lng": float(d["x"])
             })
 
-    # 2차: 주소 검색도 보조로 추가
+    # 2차: 주소 검색 보조
     address_url = "https://dapi.kakao.com/v2/local/search/address.json"
     r2 = requests.get(
         address_url,
@@ -174,6 +173,85 @@ def drive_seconds_kakao(origin_lng, origin_lat, dest_lng, dest_lat):
         return None, None
 
     return duration, distance
+
+# -----------------------------
+# 지도 표시
+# -----------------------------
+def render_result_map(origin, result_df):
+    if origin is None or result_df is None or result_df.empty:
+        return
+
+    if "위도" not in result_df.columns or "경도" not in result_df.columns:
+        return
+
+    origin_df = pd.DataFrame([
+        {
+            "name": "출발지",
+            "lat": origin["lat"],
+            "lng": origin["lng"],
+            "label": origin["address"]
+        }
+    ])
+
+    map_df = result_df.copy()
+    map_df["행정동"] = map_df["행정동"].astype(str)
+    map_df["radius"] = map_df["총인구수"].fillna(0).clip(lower=1000, upper=30000) / 8
+
+    origin_layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=origin_df,
+        get_position="[lng, lat]",
+        get_radius=180,
+        pickable=True,
+        opacity=0.9,
+        stroked=True,
+        filled=True,
+        get_fill_color=[255, 80, 80],
+        get_line_color=[255, 255, 255],
+        line_width_min_pixels=2,
+    )
+
+    dong_layer = pdk.Layer(
+        "ScatterplotLayer",
+        data=map_df,
+        get_position="[경도, 위도]",
+        get_radius="radius",
+        pickable=True,
+        opacity=0.35,
+        stroked=True,
+        filled=True,
+        get_fill_color=[0, 128, 255],
+        get_line_color=[255, 255, 255],
+        line_width_min_pixels=1,
+    )
+
+    view_state = pdk.ViewState(
+        latitude=float((origin["lat"] + map_df["위도"].mean()) / 2),
+        longitude=float((origin["lng"] + map_df["경도"].mean()) / 2),
+        zoom=11,
+        pitch=0,
+    )
+
+    tooltip = {
+        "html": """
+        <b>{행정동}</b><br/>
+        이동시간: {이동시간(분)}분<br/>
+        거리: {거리(km)}km<br/>
+        총인구수: {총인구수}
+        """,
+        "style": {
+            "backgroundColor": "rgba(20,20,20,0.85)",
+            "color": "white"
+        }
+    }
+
+    deck = pdk.Deck(
+        layers=[dong_layer, origin_layer],
+        initial_view_state=view_state,
+        tooltip=tooltip,
+    )
+
+    st.pydeck_chart(deck, use_container_width=True, height=500)
 
 # -----------------------------
 # UI
@@ -246,7 +324,6 @@ if st.session_state.search_results:
         option_labels.append(label)
 
     selected_label = st.radio("검색 결과 선택", option_labels, index=0)
-
     selected_idx = option_labels.index(selected_label)
     st.session_state.selected_origin = st.session_state.search_results[selected_idx]
 
@@ -255,11 +332,9 @@ if st.session_state.search_results:
 # -----------------------------
 if st.session_state.selected_origin:
     origin = st.session_state.selected_origin
-
     st.success(f"선택된 위치: {origin['address']}")
 
     n_min = st.number_input("차로 몇 분?", min_value=1, max_value=180, value=30)
-
     run_btn = st.button("🚀 분석 실행", use_container_width=True)
 
     if run_btn:
@@ -293,7 +368,6 @@ if st.session_state.selected_origin:
             axis=1
         )
 
-        # 현재는 기존 방식 유지: 25km 이내 후보
         candidates = df[df["직선거리_km"] <= 25].copy()
         candidates = candidates.sort_values("직선거리_km").reset_index(drop=True)
 
@@ -342,7 +416,9 @@ if st.session_state.selected_origin:
                     "25~34세": int(row["25_34세"]) if pd.notna(row["25_34세"]) else 0,
                     "35~49세": int(row["35_49세"]) if pd.notna(row["35_49세"]) else 0,
                     "50~64세": int(row["50_64세"]) if pd.notna(row["50_64세"]) else 0,
-                    "65세이상": int(row["65세이상"]) if pd.notna(row["65세이상"]) else 0
+                    "65세이상": int(row["65세이상"]) if pd.notna(row["65세이상"]) else 0,
+                    "위도": float(row["lat"]),
+                    "경도": float(row["lng"])
                 })
 
             time.sleep(0.02)
@@ -358,7 +434,8 @@ if st.session_state.selected_origin:
                 [
                     "행정동", "이동시간(분)", "거리(km)", "총인구수",
                     "0~4세", "5~9세", "10~12세", "13~15세", "16~18세",
-                    "19~24세", "25~34세", "35~49세", "50~64세", "65세이상"
+                    "19~24세", "25~34세", "35~49세", "50~64세", "65세이상",
+                    "위도", "경도"
                 ]
             ].sort_values(["이동시간(분)", "총인구수"], ascending=[True, False]).reset_index(drop=True)
 
@@ -382,4 +459,9 @@ if st.session_state.result_df is not None:
         st.warning("해당 조건에서 생활권으로 포함되는 행정동이 없습니다.")
     else:
         st.write(f"총 {len(st.session_state.result_df)}개 행정동 포함")
-        st.dataframe(st.session_state.result_df, use_container_width=True)
+
+        st.subheader("지도")
+        render_result_map(st.session_state.selected_origin, st.session_state.result_df)
+
+        display_df = st.session_state.result_df.drop(columns=["위도", "경도"], errors="ignore")
+        st.dataframe(display_df, use_container_width=True)
